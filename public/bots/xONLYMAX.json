@@ -1,0 +1,13 @@
+{
+  "name": "xONLYMAX",
+  "ip": "avters.pl",
+  "port": 25565,
+  "version": "1.20.1",
+  "reconnectSeconds": 5,
+  "antiAfk": {
+    "jump": true,
+    "sneak": false
+  },
+  "mode": "HOLDER",
+  "autoStart": false
+}
