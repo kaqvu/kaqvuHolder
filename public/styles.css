@@ -140,13 +140,40 @@ h3 {
 .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
     cursor: pointer;
+    user-select: none;
 }
 
-.toggle-label input[type="checkbox"] {
-    width: auto;
+.toggle-switch {
+    position: relative;
+    width: 50px;
+    height: 26px;
+    background-color: #666;
+    border-radius: 13px;
+    transition: background-color 0.3s;
     cursor: pointer;
+    flex-shrink: 0;
+}
+
+.toggle-switch-dot {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background-color: #c94449;
+    border-radius: 50%;
+    transition: all 0.3s;
+}
+
+.toggle-checkbox {
+    display: none;
+}
+
+.toggle-checkbox:checked + .toggle-switch .toggle-switch-dot {
+    background-color: #4a9b5f;
+    transform: translateX(24px);
 }
 
 #spammer-options,
@@ -259,6 +286,10 @@ h3 {
 }
 
 .bot-card.bot-connecting {
+    border-left: 4px solid #d4a02a;
+}
+
+.bot-card.bot-reconnecting {
     border-left: 4px solid #d4a02a;
 }
 
@@ -503,4 +534,35 @@ h3 {
     .bots-grid {
         grid-template-columns: 1fr;
     }
+}
+
+#join-command-options,
+#edit-join-command-options {
+    display: none;
+    margin-top: 10px;
+    padding-top: 20px;
+    border-top: 1px solid #333;
+}
+
+.join-command-input {
+    width: 100%;
+    padding: 12px;
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #e6e6e6;
+    font-size: 14px;
+    font-family: 'Courier New', monospace;
+}
+
+.join-command-input:focus {
+    outline: none;
+    border-color: #9aa6b2;
+}
+
+.join-command-label {
+    display: block;
+    margin-bottom: 8px;
+    color: #9aa6b2;
+    font-weight: 500;
 }

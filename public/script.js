@@ -30,6 +30,11 @@ const createSpammerOptions = document.getElementById('spammer-options');
 const editModeSelect = document.getElementById('edit-bot-mode');
 const editSpammerOptions = document.getElementById('edit-spammer-options');
 
+const createJoinCommandCheckbox = document.getElementById('bot-join-command');
+const createJoinCommandOptions = document.getElementById('join-command-options');
+const editJoinCommandCheckbox = document.getElementById('edit-bot-join-command');
+const editJoinCommandOptions = document.getElementById('edit-join-command-options');
+
 createModeSelect.addEventListener('change', (e) => {
     if (e.target.value === 'SPAMMER') {
         createSpammerOptions.style.display = 'block';
@@ -43,6 +48,34 @@ editModeSelect.addEventListener('change', (e) => {
         editSpammerOptions.style.display = 'block';
     } else {
         editSpammerOptions.style.display = 'none';
+    }
+});
+
+createJoinCommandCheckbox.addEventListener('change', (e) => {
+    if (e.target.checked) {
+        createJoinCommandOptions.style.display = 'block';
+    } else {
+        createJoinCommandOptions.style.display = 'none';
+    }
+});
+
+editJoinCommandCheckbox.addEventListener('change', (e) => {
+    if (e.target.checked) {
+        editJoinCommandOptions.style.display = 'block';
+    } else {
+        editJoinCommandOptions.style.display = 'none';
+    }
+});
+
+document.body.addEventListener('click', (e) => {
+    if (e.target.closest('.toggle-label')) {
+        const label = e.target.closest('.toggle-label');
+        const checkbox = label.querySelector('.toggle-checkbox');
+        if (checkbox && e.target !== checkbox) {
+            e.preventDefault();
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+        }
     }
 });
 
@@ -149,13 +182,15 @@ createBotForm.addEventListener('submit', async (e) => {
     const mode = document.getElementById('bot-mode').value;
     const spammerMaxBots = document.getElementById('bot-spammer-max').value.trim();
     const spammerDelay = document.getElementById('bot-spammer-delay').value.trim();
+    const joinCommandEnabled = document.getElementById('bot-join-command').checked;
+    const joinCommandText = document.getElementById('bot-join-command-input').value.trim();
     
     if (!/^[A-Za-z0-9_-]+$/.test(name)) {
         alert('Invalid bot name. Use only letters, numbers, hyphens, and underscores.');
         return;
     }
     
-    if (!/^[A-Za-z0-9.]+$/.test(ip)) {
+    if (!/^[A-Za-z0-9.-]+$/.test(ip)) {
         alert('Invalid IP address. Use only letters, numbers, and dots.');
         return;
     }
@@ -195,7 +230,11 @@ createBotForm.addEventListener('submit', async (e) => {
                 mode,
                 autoStart: false,
                 spammerMaxBots: mode === 'SPAMMER' ? parseInt(spammerMaxBots) : undefined,
-                spammerDelay: mode === 'SPAMMER' ? parseInt(spammerDelay) : undefined
+                spammerDelay: mode === 'SPAMMER' ? parseInt(spammerDelay) : undefined,
+                joinCommand: {
+                    enabled: joinCommandEnabled,
+                    command: joinCommandEnabled ? joinCommandText : ''
+                }
             })
         });
         
@@ -210,6 +249,7 @@ createBotForm.addEventListener('submit', async (e) => {
             document.getElementById('bot-spammer-max').value = '5';
             document.getElementById('bot-spammer-delay').value = '3';
             createSpammerOptions.style.display = 'none';
+            createJoinCommandOptions.style.display = 'none';
             createBotModal.style.display = 'none';
             loadBots();
         } else {
@@ -244,6 +284,16 @@ editBotBtn.addEventListener('click', async () => {
                 editSpammerOptions.style.display = 'none';
             }
             
+            if (bot.config.joinCommand && bot.config.joinCommand.enabled) {
+                document.getElementById('edit-bot-join-command').checked = true;
+                document.getElementById('edit-bot-join-command-input').value = bot.config.joinCommand.command || '';
+                editJoinCommandOptions.style.display = 'block';
+            } else {
+                document.getElementById('edit-bot-join-command').checked = false;
+                document.getElementById('edit-bot-join-command-input').value = '';
+                editJoinCommandOptions.style.display = 'none';
+            }
+            
             editBotModal.style.display = 'flex';
         }
     } catch (e) {
@@ -264,13 +314,15 @@ editBotForm.addEventListener('submit', async (e) => {
     const mode = document.getElementById('edit-bot-mode').value;
     const spammerMaxBots = document.getElementById('edit-bot-spammer-max').value.trim();
     const spammerDelay = document.getElementById('edit-bot-spammer-delay').value.trim();
+    const joinCommandEnabled = document.getElementById('edit-bot-join-command').checked;
+    const joinCommandText = document.getElementById('edit-bot-join-command-input').value.trim();
     
     if (!/^[A-Za-z0-9_-]+$/.test(newName)) {
         alert('Invalid bot name. Use only letters, numbers, hyphens, and underscores.');
         return;
     }
     
-    if (!/^[A-Za-z0-9.]+$/.test(ip)) {
+    if (!/^[A-Za-z0-9.-]+$/.test(ip)) {
         alert('Invalid IP address. Use only letters, numbers, and dots.');
         return;
     }
@@ -309,7 +361,11 @@ editBotForm.addEventListener('submit', async (e) => {
                 antiAfk: { jump, sneak },
                 mode,
                 spammerMaxBots: mode === 'SPAMMER' ? parseInt(spammerMaxBots) : undefined,
-                spammerDelay: mode === 'SPAMMER' ? parseInt(spammerDelay) : undefined
+                spammerDelay: mode === 'SPAMMER' ? parseInt(spammerDelay) : undefined,
+                joinCommand: {
+                    enabled: joinCommandEnabled,
+                    command: joinCommandEnabled ? joinCommandText : ''
+                }
             })
         });
         
@@ -434,7 +490,8 @@ async function updateBotInfo() {
             const statusText = document.getElementById('bot-status-text');
             statusText.textContent = bot.state.toUpperCase();
             statusText.style.color = bot.state === 'online' ? '#4a9b5f' : 
-                                     bot.state === 'connecting' ? '#d4a02a' : '#c94449';
+                                     bot.state === 'connecting' ? '#d4a02a' :
+                                     bot.state === 'reconnecting' ? '#d4a02a' : '#c94449';
             
             const modeBadge = document.getElementById('bot-mode-badge');
             const modeText = bot.config.mode || 'HOLDER';
@@ -449,6 +506,14 @@ async function updateBotInfo() {
             document.getElementById('bot-info-jump').textContent = bot.config.antiAfk.jump ? 'Yes' : 'No';
             document.getElementById('bot-info-sneak').textContent = bot.config.antiAfk.sneak ? 'Yes' : 'No';
             document.getElementById('bot-info-mode').textContent = modeText;
+            
+            const joinCommandInfo = document.getElementById('join-command-info');
+            if (bot.config.joinCommand && bot.config.joinCommand.enabled) {
+                joinCommandInfo.style.display = 'block';
+                document.getElementById('bot-info-join-command').textContent = bot.config.joinCommand.command || '-';
+            } else {
+                joinCommandInfo.style.display = 'none';
+            }
             
             const spammerInfo = document.getElementById('spammer-info');
             if (bot.config.mode === 'SPAMMER') {
@@ -471,13 +536,15 @@ function updateBotControls() {
             const bot = bots.find(b => b.name === currentBot);
             if (bot) {
                 const isOnline = bot.state === 'online' || bot.state === 'connecting';
-                startBtn.disabled = isOnline;
-                stopBtn.disabled = !isOnline;
-                restartBtn.disabled = !isOnline;
+                const isReconnecting = bot.state === 'reconnecting';
                 
-                startBtn.style.opacity = isOnline ? '0.5' : '1';
-                stopBtn.style.opacity = !isOnline ? '0.5' : '1';
-                restartBtn.style.opacity = !isOnline ? '0.5' : '1';
+                startBtn.disabled = isOnline || isReconnecting;
+                stopBtn.disabled = bot.state === 'offline';
+                restartBtn.disabled = bot.state === 'offline';
+                
+                startBtn.style.opacity = (isOnline || isReconnecting) ? '0.5' : '1';
+                stopBtn.style.opacity = bot.state === 'offline' ? '0.5' : '1';
+                restartBtn.style.opacity = bot.state === 'offline' ? '0.5' : '1';
             }
         });
 }

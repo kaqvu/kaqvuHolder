@@ -19,13 +19,6 @@ const bots = new Map();
 const botLogs = new Map();
 const MAX_RECONNECT_ATTEMPTS = 5;
 
-function setBotStopping(name, isStopping) {
-    const botData = bots.get(name);
-    if (botData) {
-        botData.isStopping = isStopping;
-    }
-}
-
 function addBotLog(name, type, message) {
     if (!botLogs.has(name)) {
         botLogs.set(name, []);
@@ -51,7 +44,10 @@ function loadBots() {
                 antiAfkTimers: {},
                 reconnectAttempts: 0,
                 isStopping: false,
-                spammerConnecting: false
+                spammerConnecting: false,
+                reconnectTimeout: null,
+                connectingPromises: [],
+                pendingTimeouts: []
             });
             if (config.autoStart) {
                 startBot(config.name);
@@ -69,6 +65,14 @@ function validateBotName(name) {
 function startBot(name) {
     const botData = bots.get(name);
     if (!botData) return;
+
+    if (botData.reconnectTimeout) {
+        clearTimeout(botData.reconnectTimeout);
+        botData.reconnectTimeout = null;
+    }
+
+    botData.isStopping = false;
+    botData.reconnectAttempts = 0;
 
     const { config } = botData;
 
@@ -98,10 +102,23 @@ function startHolderBot(name) {
         io.emit('bot-state-changed', { name, state: 'connecting' });
 
         bot.on('login', () => {
+            if (botData.isStopping) {
+                bot.quit();
+                return;
+            }
             botData.state = 'online';
             botData.reconnectAttempts = 0;
             io.emit('bot-state-changed', { name, state: 'online' });
             addBotLog(name, 'system', 'Bot connected successfully');
+            
+            if (config.joinCommand && config.joinCommand.enabled && config.joinCommand.command) {
+                setTimeout(() => {
+                    if (bot && bot.entity) {
+                        bot.chat(config.joinCommand.command);
+                        addBotLog(name, 'system', `Executed join command: ${config.joinCommand.command}`);
+                    }
+                }, 1000);
+            }
             
             if (config.antiAfk.jump) {
                 botData.antiAfkTimers.jump = setInterval(() => {
@@ -175,12 +192,14 @@ function startHolderBot(name) {
 
 function startSpammerBots(name) {
     const botData = bots.get(name);
-    if (!botData || botData.spammerConnecting) return;
+    if (!botData) return;
 
     const { config } = botData;
     
     botData.instances = [];
     botData.spammerConnecting = true;
+    botData.connectingPromises = [];
+    botData.pendingTimeouts = [];
     botData.state = 'connecting';
     io.emit('bot-state-changed', { name, state: 'connecting' });
 
@@ -190,18 +209,25 @@ function startSpammerBots(name) {
     const delay = (config.spammerDelay || 3) * 1000;
 
     const connectBot = (index) => {
-        if (index >= maxBots || botData.isStopping) {
-            if (index >= maxBots) {
-                botData.spammerConnecting = false;
-                if (connectedCount > 0) {
-                    botData.state = 'online';
-                    io.emit('bot-state-changed', { name, state: 'online' });
-                    addBotLog(name, 'system', `Connected ${connectedCount}/${maxBots} bots successfully`);
-                } else {
-                    botData.state = 'offline';
-                    io.emit('bot-state-changed', { name, state: 'offline' });
-                    addBotLog(name, 'error', 'Failed to connect any bots');
-                }
+        const currentBotData = bots.get(name);
+        
+        if (!currentBotData || currentBotData.isStopping) {
+            if (currentBotData && currentBotData.isStopping) {
+                currentBotData.spammerConnecting = false;
+            }
+            return;
+        }
+
+        if (index >= maxBots) {
+            currentBotData.spammerConnecting = false;
+            if (connectedCount > 0) {
+                currentBotData.state = 'online';
+                io.emit('bot-state-changed', { name, state: 'online' });
+                addBotLog(name, 'system', `Connected ${connectedCount}/${maxBots} bots successfully`);
+            } else {
+                currentBotData.state = 'offline';
+                io.emit('bot-state-changed', { name, state: 'offline' });
+                addBotLog(name, 'error', 'Failed to connect any bots');
             }
             return;
         }
@@ -223,16 +249,64 @@ function startSpammerBots(name) {
 
             let botConnected = false;
             let botErrored = false;
+            let timeoutId = null;
+
+            const cleanupAndContinue = () => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                    const timeoutIndex = botData.pendingTimeouts.indexOf(timeoutId);
+                    if (timeoutIndex > -1) {
+                        botData.pendingTimeouts.splice(timeoutIndex, 1);
+                    }
+                }
+                
+                const checkBotData = bots.get(name);
+                if (!checkBotData || checkBotData.isStopping) {
+                    return;
+                }
+                
+                const nextTimeout = setTimeout(() => {
+                    const finalCheck = bots.get(name);
+                    if (!finalCheck || finalCheck.isStopping) {
+                        return;
+                    }
+                    
+                    const pendingIndex = botData.pendingTimeouts.indexOf(nextTimeout);
+                    if (pendingIndex > -1) {
+                        botData.pendingTimeouts.splice(pendingIndex, 1);
+                    }
+                    
+                    connectBot(index + 1);
+                }, delay);
+                
+                botData.pendingTimeouts.push(nextTimeout);
+            };
 
             bot.on('login', () => {
-                if (botConnected || botErrored) return;
+                const currentBotData = bots.get(name);
+                if (botConnected || botErrored || !currentBotData || currentBotData.isStopping) {
+                    try {
+                        bot.quit();
+                    } catch (e) {}
+                    return;
+                }
                 botConnected = true;
                 connectedCount++;
                 addBotLog(name, 'system', `${botUsername} connected successfully (${connectedCount}/${maxBots})`);
                 
+                if (config.joinCommand && config.joinCommand.enabled && config.joinCommand.command) {
+                    setTimeout(() => {
+                        if (bot && bot.entity && !currentBotData.isStopping) {
+                            bot.chat(config.joinCommand.command);
+                            addBotLog(name, 'system', `[${botUsername}] Executed join command: ${config.joinCommand.command}`);
+                        }
+                    }, 1000);
+                }
+                
                 if (config.antiAfk.jump) {
                     const jumpTimer = setInterval(() => {
-                        if (bot && bot.entity) {
+                        if (bot && bot.entity && !currentBotData.isStopping) {
                             bot.setControlState('jump', true);
                             setTimeout(() => bot.setControlState('jump', false), 100);
                         }
@@ -247,7 +321,7 @@ function startSpammerBots(name) {
                     bot.setControlState('sneak', true);
                 }
 
-                setTimeout(() => connectBot(index + 1), delay);
+                cleanupAndContinue();
             });
 
             bot.on('message', (jsonMsg) => {
@@ -290,27 +364,66 @@ function startSpammerBots(name) {
                 botErrored = true;
                 addBotLog(name, 'error', `[${botUsername}] ${err.message}`);
                 if (!botConnected) {
-                    setTimeout(() => connectBot(index + 1), delay);
+                    cleanupAndContinue();
                 }
             });
 
             bot.on('kicked', (reason) => {
                 addBotLog(name, 'error', `[${botUsername}] Kicked: ${reason}`);
                 if (!botConnected) {
-                    setTimeout(() => connectBot(index + 1), delay);
+                    cleanupAndContinue();
                 }
             });
 
             bot.on('end', () => {
                 if (!botConnected && !botErrored) {
                     addBotLog(name, 'system', `[${botUsername}] disconnected before login`);
-                    setTimeout(() => connectBot(index + 1), delay);
+                    cleanupAndContinue();
                 }
             });
 
+            timeoutId = setTimeout(() => {
+                const timeoutBotData = bots.get(name);
+                if (!botConnected && !botErrored && timeoutBotData && !timeoutBotData.isStopping) {
+                    addBotLog(name, 'error', `[${botUsername}] Connection timeout`);
+                    try {
+                        bot.quit();
+                    } catch (e) {}
+                    cleanupAndContinue();
+                }
+                
+                if (timeoutBotData) {
+                    const timeoutIndex = timeoutBotData.pendingTimeouts.indexOf(timeoutId);
+                    if (timeoutIndex > -1) {
+                        timeoutBotData.pendingTimeouts.splice(timeoutIndex, 1);
+                    }
+                }
+            }, 30000);
+            
+            botData.pendingTimeouts.push(timeoutId);
+
         } catch (e) {
             addBotLog(name, 'error', `Error creating bot ${index + 1}: ${e.message}`);
-            setTimeout(() => connectBot(index + 1), delay);
+            const errorBotData = bots.get(name);
+            if (!errorBotData || errorBotData.isStopping) {
+                return;
+            }
+            
+            const errorTimeout = setTimeout(() => {
+                const finalErrorCheck = bots.get(name);
+                if (!finalErrorCheck || finalErrorCheck.isStopping) {
+                    return;
+                }
+                
+                const pendingIndex = botData.pendingTimeouts.indexOf(errorTimeout);
+                if (pendingIndex > -1) {
+                    botData.pendingTimeouts.splice(pendingIndex, 1);
+                }
+                
+                connectBot(index + 1);
+            }, delay);
+            
+            botData.pendingTimeouts.push(errorTimeout);
         }
     };
 
@@ -321,23 +434,28 @@ function handleDisconnect(name) {
     const botData = bots.get(name);
     if (!botData) return;
 
-    clearAntiAfkTimers(name);
-    botData.instance = null;
-    botData.state = 'offline';
-    io.emit('bot-state-changed', { name, state: 'offline' });
-
     if (botData.isStopping) {
-        botData.isStopping = false;
+        clearAntiAfkTimers(name);
+        botData.instance = null;
+        botData.state = 'offline';
+        io.emit('bot-state-changed', { name, state: 'offline' });
         return;
     }
 
+    clearAntiAfkTimers(name);
+    botData.instance = null;
+
     if (botData.config.reconnectSeconds > 0 && botData.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        botData.state = 'reconnecting';
+        io.emit('bot-state-changed', { name, state: 'reconnecting' });
+        
         if (botData.reconnectAttempts > 0) {
             addBotLog(name, 'system', `Reconnect attempt ${botData.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${botData.config.reconnectSeconds}s`);
         } else {
             addBotLog(name, 'system', `Reconnecting in ${botData.config.reconnectSeconds}s`);
         }
-        setTimeout(() => {
+        
+        botData.reconnectTimeout = setTimeout(() => {
             if (bots.has(name) && !bots.get(name).instance && !bots.get(name).isStopping) {
                 botData.reconnectAttempts++;
                 startBot(name);
@@ -346,6 +464,11 @@ function handleDisconnect(name) {
     } else if (botData.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         addBotLog(name, 'error', 'Max reconnect attempts reached. Bot stopped.');
         botData.reconnectAttempts = 0;
+        botData.state = 'offline';
+        io.emit('bot-state-changed', { name, state: 'offline' });
+    } else {
+        botData.state = 'offline';
+        io.emit('bot-state-changed', { name, state: 'offline' });
     }
 }
 
@@ -353,38 +476,66 @@ function stopBot(name) {
     const botData = bots.get(name);
     if (!botData) return;
 
-    clearAntiAfkTimers(name);
-    botData.reconnectAttempts = 0;
     botData.isStopping = true;
+    botData.reconnectAttempts = 0;
     botData.spammerConnecting = false;
     
+    if (botData.reconnectTimeout) {
+        clearTimeout(botData.reconnectTimeout);
+        botData.reconnectTimeout = null;
+    }
+    
+    if (botData.pendingTimeouts && Array.isArray(botData.pendingTimeouts)) {
+        botData.pendingTimeouts.forEach(timeout => {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        });
+        botData.pendingTimeouts = [];
+    }
+    
+    clearAntiAfkTimers(name);
+    
     if (botData.config.mode === 'SPAMMER') {
-        botData.instances.forEach(bot => {
+        const instancesCopy = [...botData.instances];
+        botData.instances = [];
+        
+        instancesCopy.forEach(bot => {
             try {
                 if (bot && bot.entity) {
                     if (botData.config.antiAfk.sneak) {
                         bot.setControlState('sneak', false);
                     }
+                }
+                if (bot) {
                     bot.quit();
+                    bot.removeAllListeners();
                 }
             } catch (e) {
                 console.error('Error quitting bot:', e);
             }
         });
-        botData.instances = [];
+        
+        botData.state = 'offline';
+        botData.isStopping = false;
+        io.emit('bot-state-changed', { name, state: 'offline' });
     } else {
-        if (botData.config.antiAfk.sneak && botData.instance) {
-            botData.instance.setControlState('sneak', false);
-        }
         if (botData.instance) {
-            botData.instance.quit();
+            try {
+                if (botData.config.antiAfk.sneak) {
+                    botData.instance.setControlState('sneak', false);
+                }
+                botData.instance.quit();
+                botData.instance.removeAllListeners();
+            } catch (e) {
+                console.error('Error quitting bot:', e);
+            }
+            botData.instance = null;
         }
-        botData.instance = null;
+        botData.state = 'offline';
+        botData.isStopping = false;
+        io.emit('bot-state-changed', { name, state: 'offline' });
     }
-    
-    botData.state = 'offline';
-    botData.isStopping = false;
-    io.emit('bot-state-changed', { name, state: 'offline' });
 }
 
 function clearAntiAfkTimers(name) {
@@ -419,13 +570,13 @@ app.get('/api/bots/:name/logs', (req, res) => {
 });
 
 app.post('/api/bots', (req, res) => {
-    const { name, ip, port, version, reconnectSeconds, antiAfk, mode, autoStart, spammerMaxBots, spammerDelay } = req.body;
+    const { name, ip, port, version, reconnectSeconds, antiAfk, mode, autoStart, spammerMaxBots, spammerDelay, joinCommand } = req.body;
 
     if (!validateBotName(name)) {
         return res.status(400).json({ error: 'Invalid bot name' });
     }
 
-    if (!/^[A-Za-z0-9.]+$/.test(ip)) {
+    if (!/^[A-Za-z0-9.-]+$/.test(ip)) {
         return res.status(400).json({ error: 'Invalid IP address' });
     }
 
@@ -443,7 +594,8 @@ app.post('/api/bots', (req, res) => {
         mode: mode || 'HOLDER',
         autoStart: autoStart || false,
         spammerMaxBots: mode === 'SPAMMER' ? (parseInt(spammerMaxBots) || 5) : undefined,
-        spammerDelay: mode === 'SPAMMER' ? (parseInt(spammerDelay) || 3) : undefined
+        spammerDelay: mode === 'SPAMMER' ? (parseInt(spammerDelay) || 3) : undefined,
+        joinCommand: joinCommand || { enabled: false, command: '' }
     };
 
     const filePath = path.join(BOTS_DIR, `${name}.json`);
@@ -462,7 +614,10 @@ app.post('/api/bots', (req, res) => {
             antiAfkTimers: {},
             reconnectAttempts: 0,
             isStopping: false,
-            spammerConnecting: false
+            spammerConnecting: false,
+            reconnectTimeout: null,
+            connectingPromises: [],
+            pendingTimeouts: []
         });
         io.emit('bot-list-updated');
         res.json({ success: true, bot: config });
@@ -473,7 +628,7 @@ app.post('/api/bots', (req, res) => {
 
 app.put('/api/bots/:name', (req, res) => {
     const { name } = req.params;
-    const { newName, ip, port, version, reconnectSeconds, antiAfk, mode, spammerMaxBots, spammerDelay } = req.body;
+    const { newName, ip, port, version, reconnectSeconds, antiAfk, mode, spammerMaxBots, spammerDelay, joinCommand } = req.body;
 
     if (!bots.has(name)) {
         return res.status(404).json({ error: 'Bot not found' });
@@ -489,7 +644,7 @@ app.put('/api/bots/:name', (req, res) => {
         }
     }
 
-    if (!/^[A-Za-z0-9.]+$/.test(ip)) {
+    if (!/^[A-Za-z0-9.-]+$/.test(ip)) {
         return res.status(400).json({ error: 'Invalid IP address' });
     }
 
@@ -511,13 +666,20 @@ app.put('/api/bots/:name', (req, res) => {
         mode: mode || 'HOLDER',
         autoStart: oldConfig.autoStart,
         spammerMaxBots: mode === 'SPAMMER' ? (parseInt(spammerMaxBots) || 5) : undefined,
-        spammerDelay: mode === 'SPAMMER' ? (parseInt(spammerDelay) || 3) : undefined
+        spammerDelay: mode === 'SPAMMER' ? (parseInt(spammerDelay) || 3) : undefined,
+        joinCommand: joinCommand || { enabled: false, command: '' }
     };
 
     const oldFilePath = path.join(BOTS_DIR, `${name}.json`);
     const newFilePath = path.join(BOTS_DIR, `${finalName}.json`);
 
     try {
+        const wasRunning = botData.instance || botData.instances.length > 0;
+        
+        if (wasRunning) {
+            stopBot(name);
+        }
+
         if (newName && newName !== name) {
             if (fs.existsSync(oldFilePath)) {
                 fs.unlinkSync(oldFilePath);
@@ -536,7 +698,10 @@ app.put('/api/bots/:name', (req, res) => {
                 antiAfkTimers: {},
                 reconnectAttempts: 0,
                 isStopping: false,
-                spammerConnecting: false
+                spammerConnecting: false,
+                reconnectTimeout: null,
+                connectingPromises: [],
+                pendingTimeouts: []
             });
         } else {
             botData.config = newConfig;
@@ -544,16 +709,10 @@ app.put('/api/bots/:name', (req, res) => {
 
         fs.writeFileSync(newFilePath, JSON.stringify(newConfig, null, 2));
         
-        if (botData.instance || botData.instances.length > 0) {
-            botData.isStopping = true;
-            stopBot(name);
+        if (wasRunning) {
             setTimeout(() => {
-                const currentBotData = bots.get(finalName);
-                if (currentBotData) {
-                    currentBotData.isStopping = false;
-                    startBot(finalName);
-                }
-            }, 1000);
+                startBot(finalName);
+            }, 1500);
         }
 
         io.emit('bot-list-updated');
@@ -574,6 +733,11 @@ app.delete('/api/bots/:name', (req, res) => {
     
     if (botData.instance || botData.instances.length > 0) {
         stopBot(name);
+    }
+
+    if (botData.reconnectTimeout) {
+        clearTimeout(botData.reconnectTimeout);
+        botData.reconnectTimeout = null;
     }
 
     const filePath = path.join(BOTS_DIR, `${name}.json`);
@@ -617,13 +781,11 @@ app.post('/api/bots/:name/restart', (req, res) => {
         return res.status(404).json({ error: 'Bot not found' });
     }
     const botData = bots.get(name);
-    botData.isStopping = true;
     botData.reconnectAttempts = 0;
     stopBot(name);
     setTimeout(() => {
-        botData.isStopping = false;
         startBot(name);
-    }, botData.config.reconnectSeconds * 1000);
+    }, botData.config.reconnectSeconds * 1000 || 1000);
     res.json({ success: true });
 });
 

@@ -145,13 +145,36 @@
                         <label>Anti-AFK Options</label>
                         <div class="toggle-group">
                             <label class="toggle-label">
-                                <input type="checkbox" id="bot-jump">
+                                <input type="checkbox" id="bot-jump" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
                                 <span>Jump (continuous)</span>
                             </label>
                             <label class="toggle-label">
-                                <input type="checkbox" id="bot-sneak">
+                                <input type="checkbox" id="bot-sneak" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
                                 <span>Sneak (hold)</span>
                             </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Join Command</label>
+                        <div class="toggle-group">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="bot-join-command" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
+                                <span>Execute on join</span>
+                            </label>
+                        </div>
+                        <div id="join-command-options">
+                            <label class="join-command-label">Command or message to execute after joining:</label>
+                            <input type="text" id="bot-join-command-input" class="join-command-input" placeholder="/register password password">
                         </div>
                     </div>
                     
@@ -284,13 +307,36 @@
                         <label>Anti-AFK Options</label>
                         <div class="toggle-group">
                             <label class="toggle-label">
-                                <input type="checkbox" id="edit-bot-jump">
+                                <input type="checkbox" id="edit-bot-jump" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
                                 <span>Jump (continuous)</span>
                             </label>
                             <label class="toggle-label">
-                                <input type="checkbox" id="edit-bot-sneak">
+                                <input type="checkbox" id="edit-bot-sneak" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
                                 <span>Sneak (hold)</span>
                             </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Join Command</label>
+                        <div class="toggle-group">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="edit-bot-join-command" class="toggle-checkbox">
+                                <div class="toggle-switch">
+                                    <div class="toggle-switch-dot"></div>
+                                </div>
+                                <span>Execute on join</span>
+                            </label>
+                        </div>
+                        <div id="edit-join-command-options">
+                            <label class="join-command-label">Command or message to execute after joining:</label>
+                            <input type="text" id="edit-bot-join-command-input" class="join-command-input" placeholder="/register password password">
                         </div>
                     </div>
                     
@@ -364,6 +410,12 @@
                             <div class="info-item">
                                 <span class="info-label">Mode:</span>
                                 <span id="bot-info-mode" class="info-value">-</span>
+                            </div>
+                            <div id="join-command-info" style="display: none;">
+                                <div class="info-item">
+                                    <span class="info-label">Join Command:</span>
+                                    <span id="bot-info-join-command" class="info-value">-</span>
+                                </div>
                             </div>
                             <div id="spammer-info">
                                 <div class="info-item">
